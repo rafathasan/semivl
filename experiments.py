@@ -60,10 +60,10 @@ def human_format(num):
 def config_from_vars(
     exp_id,
     gpu_model='a100',
-    n_gpus=4,
+    n_gpus=1,
     n_nodes=1,
-    batch_size=2,
-    epochs=80,
+    batch_size=1,
+    epochs=10,
     iters=None,
     scheduler_max_iters=None,
     dataset='pascal',
