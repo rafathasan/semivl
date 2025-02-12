@@ -21,7 +21,10 @@ import os.path as osp
 import subprocess
 import collections.abc
 from version import __version__
+import torch
 
+os.environ["OMP_NUM_THREADS"] = "1"
+torch.set_num_threads(1)
 
 DATA_DIR = '~/data/'
 
