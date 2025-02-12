@@ -65,7 +65,7 @@ def config_from_vars(
     gpu_model='a100',
     n_gpus=1,
     n_nodes=1,
-    batch_size=8,
+    batch_size=6,
     epochs=100,
     iters=None,
     scheduler_max_iters=None,
