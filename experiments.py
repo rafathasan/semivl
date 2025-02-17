@@ -66,7 +66,7 @@ def config_from_vars(
     n_gpus=2,
     n_nodes=1,
     batch_size=3,
-    epochs=100,
+    epochs=1,
     iters=None,
     scheduler_max_iters=None,
     dataset='pascal',
