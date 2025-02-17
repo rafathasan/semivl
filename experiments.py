@@ -23,8 +23,8 @@ import collections.abc
 from version import __version__
 import torch
 
-os.environ["OMP_NUM_THREADS"] = "1"
-torch.set_num_threads(1)
+#os.environ["OMP_NUM_THREADS"] = "1"
+#torch.set_num_threads(1)
 
 DATA_DIR = '~/data/'
 
@@ -63,9 +63,9 @@ def human_format(num):
 def config_from_vars(
     exp_id,
     gpu_model='a100',
-    n_gpus=1,
+    n_gpus=2,
     n_nodes=1,
-    batch_size=6,
+    batch_size=3,
     epochs=100,
     iters=None,
     scheduler_max_iters=None,
