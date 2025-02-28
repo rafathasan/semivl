@@ -63,7 +63,7 @@ def human_format(num):
 def config_from_vars(
     exp_id,
     gpu_model='a100',
-    n_gpus=2,
+    n_gpus=1,
     n_nodes=1,
     batch_size=3,
     epochs=100,
