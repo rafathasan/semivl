@@ -1,17 +1,3 @@
-# Copyright 2023 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import argparse
 import logging
 import math
@@ -32,6 +18,9 @@ from torch import nn
 from torch.optim import SGD
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+
+# Import wandb for experiment tracking
+import wandb
 
 from datasets.palettes import get_palette
 from experiments import get_git_revision
@@ -75,11 +64,16 @@ if __name__ == '__main__':
     logger.propagate = 0
     mmcv.utils.get_logger('mmcv').setLevel('WARNING')
 
+    # Setup distributed training
     rank, world_size = setup_distributed(port=args.port)
     if cfg['nccl_p2p_disable']:
         os.environ["NCCL_P2P_DISABLE"] = str(1)
 
+    # Only the main process logs to wandb
     if rank == 0:
+        # Login to wandb at runtime using the provided API key
+        wandb.login(key="7a8eb04e25647177cf894aa0687e4def737bc4fc")
+
         timestr = datetime.now().strftime("%y%m%d-%H%M")
         uid = str(uuid.uuid4())[:5]
         run_name = f'{timestr}_{cfg["name"]}_v{__version__}_{uid}'.replace('.', '-')
@@ -91,19 +85,22 @@ if __name__ == '__main__':
         fileHandler.setFormatter(formatter)
         logger.addHandler(fileHandler)
 
-        all_args = {**cfg, **vars(args), 
+        all_args = {**cfg, **vars(args),
                     'labeled_id_path': labeled_id_path, 'unlabeled_id_path': unlabeled_id_path,
                     'ngpus': world_size, 'run_name': run_name, 'save_path': save_path,
                     'exec_git_rev': get_git_revision(), 'exec_version': __version__}
         logger.info('{}\n'.format(pprint.pformat(all_args)))
-        
+
         writer = SummaryWriter(save_path)
-        
+
+        # Initialize wandb with the configuration and run name
+        wandb.init(project='SemiVL-VOC', config=all_args, name=run_name, dir=save_path)
+
         shutil.copyfile(args.config, os.path.join(save_path, 'config.yaml'))
         with open(os.path.join(save_path, 'all_args.yaml'), 'w') as f:
             yaml.dump(all_args, f, default_flow_style=None, sort_keys=False, indent=2)
         gen_code_archive(save_path)
-    
+
     cudnn.enabled = True
     cudnn.benchmark = True
 
@@ -117,13 +114,13 @@ if __name__ == '__main__':
     model = build_model(cfg)
     if 'optimizer' not in cfg:
         optimizer = SGD([{'params': model.backbone.parameters(), 'lr': cfg['lr']},
-                        {'params': [param for name, param in model.named_parameters() if 'backbone' not in name],
-                        'lr': cfg['lr'] * cfg['lr_multi']}], lr=cfg['lr'], momentum=0.9, weight_decay=1e-4)
+                         {'params': [param for name, param in model.named_parameters() if 'backbone' not in name],
+                          'lr': cfg['lr'] * cfg['lr_multi']}], lr=cfg['lr'], momentum=0.9, weight_decay=1e-4)
     else:
         optimizer = build_optimizer(model, cfg['optimizer'])
         for group in optimizer.param_groups:
             group.setdefault('initial_lr', group['lr'])
-    
+
     if rank == 0:
         logger.info(model)
         logger.info(f'Total params: {count_params(model):.1f}M\n')
@@ -189,7 +186,7 @@ if __name__ == '__main__':
         logger.info(f'Train for {cfg["epochs"]} epochs / {total_iters} iterations.')
     previous_best = 0.0
     epoch = -1
-    
+
     for epoch in range(epoch + 1, cfg['epochs']):
         if rank == 0:
             logger.info('===========> Epoch: {:}, LR: {:.5f}, Previous best: {:.2f}'.format(
@@ -343,7 +340,6 @@ if __name__ == '__main__':
                 else:
                     for group in optimizer.param_groups:
                         group['lr'] = group['initial_lr'] * (1 - iters / scheduler_max_iters) ** 0.9
-                        # print(iters, group['initial_lr'], group['lr'], group['weight_decay'])
 
             # Logging
             log_avg.update({
@@ -365,7 +361,8 @@ if __name__ == '__main__':
                 logger.info(f'Iters: {i} ' + str(log_avg))
                 for k, v in log_avg.avgs.items():
                     writer.add_scalar(k, v, iters)
-
+                # Log metrics to wandb
+                wandb.log(log_avg.avgs, step=iters)
                 log_avg.reset()
 
             if iters % len(trainloader_u) == 0 and rank == 0:
@@ -397,7 +394,7 @@ if __name__ == '__main__':
                         ])
                         rows += 1
                     fig, axs = plt.subplots(
-                        rows, cols, figsize=(2 * cols, 2 * rows), squeeze=False, 
+                        rows, cols, figsize=(2 * cols, 2 * rows), squeeze=False,
                         gridspec_kw={'hspace': 0.1, 'wspace': 0, 'top': 0.95, 'bottom': 0, 'right': 1, 'left': 0})
                     for ax, plot_dict in zip(axs.flat, plot_dicts):
                         if plot_dict is not None:
@@ -412,13 +409,15 @@ if __name__ == '__main__':
             if rank == 0:
                 logger.info(run_name)
                 for (cls_idx, iou) in enumerate(iou_class):
-                    logger.info('***** Evaluation ***** >>>> Class [{:} {:}] '
-                                'IoU: {:.2f}'.format(cls_idx, CLASSES[cfg['dataset']][cls_idx], iou))
+                    logger.info('***** Evaluation ***** >>>> Class [{:} {:}] IoU: {:.2f}'
+                                .format(cls_idx, CLASSES[cfg['dataset']][cls_idx], iou))
                 logger.info('***** Evaluation {} ***** >>>> MeanIoU: {:.2f}\n'.format(eval_mode, mIoU))
-                
+
                 writer.add_scalar('eval/mIoU', mIoU, epoch)
+                wandb.log({'eval/mIoU': mIoU, 'epoch': epoch})
                 for i, iou in enumerate(iou_class):
                     writer.add_scalar('eval/%s_IoU' % (CLASSES[cfg['dataset']][i]), iou, epoch)
+                    wandb.log({f'eval/{CLASSES[cfg["dataset"]][i]}_IoU': iou, 'epoch': epoch})
 
             is_best = mIoU > previous_best
             previous_best = max(mIoU, previous_best)
